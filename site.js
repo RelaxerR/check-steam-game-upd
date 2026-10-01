@@ -30,10 +30,10 @@
     byId('minutes').textContent = String(Math.floor(remaining / 60) % 60).padStart(2, '0');
     byId('seconds').textContent = String(remaining % 60).padStart(2, '0');
     byId('now').textContent = clockFormat.format(now);
-    byId('countdown-label').textContent = due ? 'ВРЕМЯ ПРИШЛО. ПРОВЕРЬ STEAM.' : assembled ? 'ДО ОЖИДАЕМОГО ОБНОВЛЕНИЯ' : 'ДО СБОРА СТАИ';
+    byId('countdown-label').textContent = due ? 'ВРЕМЯ ПРИШЛО. ПРОВЕРЬ STEAM.' : assembled ? 'ДО ОЖИДАЕМОГО ОБНОВЛЕНИЯ' : 'ДО СБОРА КАРТЕЛЯ';
     byId('timer').setAttribute('aria-label', assembled ? 'Время до ожидаемого обновления' : 'Время до сбора');
     byId('phase').textContent = due ? 'ЖДЁМ РЕЛИЗ В STEAM' : assembled ? 'СБОР ИДЁТ / ЖДЁМ ОБНОВУ' : 'ОЖИДАНИЕ ВАЙПА';
-    byId('timer-note').textContent = due ? 'Расписание закончилось. Обновление могло задержаться — проверь клиент.' : assembled ? 'Стая в сборе. Кто не зашёл — тот фармит серу.' : 'Последние часы нормальной жизни. Пользуйся.';
+    byId('timer-note').textContent = due ? 'Расписание закончилось. Обновление могло задержаться — проверь клиент.' : assembled ? 'Картель собирается. Кто не зашёл — тот фармит серу.' : 'Последние часы нормальной жизни. Пользуйся.';
     byId('gathering-card').classList.toggle('passed', assembled);
     byId('gathering-card').classList.toggle('active', !assembled);
     byId('update-card').classList.toggle('active', assembled && !due);
@@ -87,7 +87,7 @@
     byId('music-button').setAttribute('aria-pressed', String(!music.paused));
   });
   byId('copy-link').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(location.href); toast('Ссылка скопирована. Собирай стаю.'); }
+    try { await navigator.clipboard.writeText(location.href); toast('Ссылка скопирована. Собирай картель.'); }
     catch { window.prompt('Скопируй ссылку и кинь кентам:', location.href); }
   });
 })();
