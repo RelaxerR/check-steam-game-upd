@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#161612">
+  <meta name="description" content="Сбор на вайп Rust. 21:00 — собираемся. Около 21:30 — ждём обновление. GMT+4. Сон отменён.">
+  <meta property="og:title" content="ВАЙП БЛИЗКО. Сон отменён.">
+  <meta property="og:description" content="Сбор в 21:00 · Обновление ≈21:30 · GMT+4. Снова голые. Снова злые. Снова до утра.">
+  <title>ВАЙП БЛИЗКО / RUST</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+  <script src="site-config.js" defer></script>
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <video id="meme-video" class="meme-video" autoplay muted playsinline preload="metadata" aria-hidden="true"></video>
+  <div class="wash" aria-hidden="true"></div><div class="grain" aria-hidden="true"></div>
+  <div class="hazard" aria-hidden="true"></div>
+  <header>
+    <a class="brand" href="#" aria-label="В начало"><span class="brand-mark">R</span> RUST<span class="brand-slash">/</span> ПЕРЕСМЕНКА</a>
+    <div class="top-status"><span class="live-dot"></span><span id="phase">ОЖИДАНИЕ ВАЙПА</span></div>
+    <span class="edition" id="edition">01.10.2026 / GMT+4</span>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-top"><span class="eyebrow">ОПЕРАЦИЯ «ОПЯТЬ БЕЗ ШТАНОВ»</span><span class="serial">№ 252490</span></div>
+      <div class="headline-wrap">
+        <h1 id="hero-title">ВАЙП<br><span>БЛИЗКО<span class="full-stop">.</span></span></h1>
+        <div class="stamp" aria-hidden="true">СОН<br>ОТМЕНЁН<span>И ЗАВТРА ТОЖЕ</span></div>
+      </div>
+      <p class="tagline">Снова голые. Снова злые. <span>Снова до утра.</span></p>
+      <div class="countdown-panel">
+        <div class="countdown-label"><span id="countdown-label">ДО СБОРА СТАИ</span><span class="clock">СЕЙЧАС <b id="now">--:--:--</b> / GMT+4</span></div>
+        <div class="countdown" role="timer" aria-label="Время до сбора" id="timer">
+          <div class="number"><span id="hours">00</span><small>ЧАСОВ</small></div><span class="colon">:</span>
+          <div class="number"><span id="minutes">00</span><small>МИНУТ</small></div><span class="colon">:</span>
+          <div class="number seconds"><span id="seconds">00</span><small>СЕКУНД</small></div>
+        </div>
+        <p class="timer-note" id="timer-note">Последние часы нормальной жизни. Пользуйся.</p>
+      </div>
+      <div class="schedule">
+        <article id="gathering-card"><span class="step">01 / ПЕРЕКЛИЧКА</span><strong id="gathering-time">21:00</strong><p>Собираемся. Проверяем микрофон.<br>Находим того, кто «щас, пять минут».</p><span class="card-status" id="gathering-status">ЖДЁМ ОПОЗДУНОВ</span></article>
+        <article id="update-card"><span class="step">02 / НОВАЯ ЖИЗНЬ</span><strong id="update-time">≈21:30</strong><p>Ожидаем обновление. Качаем.<br>Первые камни — в лицо судьбе.</p><span class="card-status" id="update-status">ПО РАСПИСАНИЮ, НЕ ПО ФАКТУ</span></article>
+      </div>
+      <div class="actions"><a class="steam-button" href="steam://open/downloads">ОТКРЫТЬ ЗАГРУЗКИ STEAM <span>↗</span></a><button id="copy-link" type="button">КИНУТЬ КЕНТАМ <span>⧉</span></button></div>
+      <p class="fine-print">21:30 — ориентир, а не обещание. Появление обновления проверяй в Steam.<br>Этот сайт считает время. Твою базу всё равно снесут.</p>
+    </section>
+    <aside class="side-note" aria-hidden="true"><span>НЕ ОТКЛАДЫВАЙ НА ЗАВТРА</span><b>ТЕБЯ УЖЕ РЕЙДЯТ</b></aside>
+  </main>
+  <footer>
+    <div class="footer-left"><span class="tiny-square"></span><span>КАМЕНЬ. ФАКЕЛ. НОЛЬ САМООЦЕНКИ.</span></div>
+    <div class="media-controls"><a id="meme-source" href="https://mem-tube.ru/page/6" target="_blank" rel="noopener noreferrer">МЕМ-ТРУБА</a><button id="next-meme" type="button" title="Следующий случайный мем">ДРУГОЙ МЕМ ↻</button><button id="pause-video" type="button" aria-pressed="false">ПАУЗА ФОНА</button><button id="music-button" type="button" aria-pressed="false">ФОНК: ВЫКЛ</button></div>
+  </footer>
+  <audio id="music" src="assets/audio/phonk-killer.mp3" preload="none" loop></audio>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <noscript><div class="noscript">Сбор 1 октября 2026 в 21:00, обновление ожидаем около 21:30 (GMT+4). Для живого таймера включи JavaScript.</div></noscript>
+</body>
+</html>
