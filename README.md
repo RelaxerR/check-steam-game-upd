@@ -233,4 +233,4 @@ python3 -m compileall -q steam_watch.py tests
 python3 -m http.server 8000
 ```
 
-Откройте http://localhost:8000/. Публикация выполняется workflow `.github/workflows/pages.yml` при изменении файлов сайта в `main` или вручную через GitHub Actions. В настройках репозитория **Settings → Pages → Source** выбран **GitHub Actions**. В артефакт сайта попадают только HTML, CSS, JS, favicon и `assets`; личный `config.toml`, состояние и Python-код туда не включаются.
+Откройте http://localhost:8000/. Pages использует встроенную публикацию из **main / (root)** и автоматически обновляется после push в `main`. В **Settings → Pages → Source** выбрано **Deploy from a branch**; файл `.nojekyll` отключает обработку Jekyll. Персональный `config.toml`, состояние и секреты исключены из Git и не публикуются. Репозиторий открыт: остальные отслеживаемые файлы проекта публичны.
