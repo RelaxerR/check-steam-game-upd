@@ -8,21 +8,34 @@ steam_path = ""
 manifest_path = ""
 
 [watch]
-# Читаем только локальные файлы. Минимум 1 секунда, по умолчанию 2.
-poll_seconds = 2
+# Читаем только локальные файлы. Минимум 1 секунда, по умолчанию 1.
+poll_seconds = 1
 # Каталог состояния относительно конфига; подавляет повторные уведомления.
 state_file = ".state"
 
 [notifications]
 desktop = true
 sound = true
-# Очередь не доказывает доступность CDN: по умолчанию только запись в консоль.
-queued = false
+# Раннее уведомление: Steam требует обновление, можно открыть Загрузки.
+queued = true
 # Сообщить, если обновление успело установиться между проверками.
 installed = true
+# Публикация сборки — предварительный сигнал, не гарантия локальной доступности.
+published = true
 
 [telegram]
 enabled = false
 # Секреты берутся из окружения, не из файла и не попадают в Git.
 token_env = "STEAM_WATCH_TELEGRAM_TOKEN"
 chat_id_env = "STEAM_WATCH_TELEGRAM_CHAT_ID"
+
+[release]
+# Ранняя проверка публикации через официальный SteamCMD (если установлен).
+# При отсутствии SteamCMD локальный мониторинг продолжает работать.
+enabled = true
+# Имя в PATH или полный путь к steamcmd.exe / steamcmd.sh.
+steamcmd_path = "steamcmd"
+# Сетевой опрос отдельно от локального: минимум 60 с, ошибки → backoff до 15 мин.
+poll_seconds = 60
+# SteamCMD нужно заранее запустить один раз, чтобы он обновил себя.
+timeout_seconds = 45

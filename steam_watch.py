@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observe the local Steam client's appmanifest, without polling Steam servers."""
+"""Early Steam build alerts, local update queue and download confirmation."""
 from __future__ import annotations
 
 import argparse
@@ -9,8 +9,11 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 import urllib.parse
@@ -157,9 +160,18 @@ class Tracker:
         events = []
         identity = f"{current.branch}:{current.build}:{current.target}"
         if current.pending:
-            events.append((f"queued:{identity}",
+            events.append((f"queued:early:{identity}",
                            f"Steam на этом ПК отметил обновление: {current.build} → {current.target} "
-                           f"(ветка {current.branch}). Загрузка ещё не подтверждена."))
+                           f"(ветка {current.branch}). Откройте Steam → Загрузки и нажмите «Скачать сейчас». "
+                           "Получение данных ещё не подтверждено."))
+        elif (current.target in {"", "0"} and current.flags & 2
+              and not current.flags & (32 | 128)):
+            # Some clients do not write TargetBuildID until downloading starts.
+            # A requirement alone may also be validation; never call this a proven release.
+            events.append((f"required:{current.branch}:{current.build}",
+                           "Steam на этом ПК запросил обновление или проверку файлов; "
+                           "целевая сборка ещё не записана. Откройте Steam → Загрузки "
+                           "и проверьте игру. Новый релиз и получение данных пока не подтверждены."))
         # Only a live increase proves bytes were received; a flag/cached counter doesn't.
         if (previous and current.pending and current.branch == previous.branch
                 and current.target == previous.target and current.build == previous.build
@@ -173,6 +185,131 @@ class Tracker:
                            f"Steam установил другую сборку: {previous.build} → {current.build}."))
         self.previous = current
         return [(key, message) for key, message in events if key not in self.sent]
+
+
+def parse_app_info(output: str, app_id: int, branch: str) -> str:
+    """Extract a single complete KeyValues app block from noisy SteamCMD output."""
+    marker = re.search(r'"' + str(app_id) + r'"\s*\{', output)
+    if marker is None:
+        raise ValueError("SteamCMD не вернул информацию об игре")
+    depth = 0
+    for token in re.finditer(r'"(?:\\.|[^"\\])*"|[{}]', output[marker.start():]):
+        if token.group() == "{":
+            depth += 1
+        elif token.group() == "}":
+            depth -= 1
+            if depth == 0:
+                data = parse_vdf(output[marker.start():marker.start() + token.end()])
+                info = data[str(app_id)]["depots"]["branches"][branch]
+                if info.get("pwdrequired", "0") != "0":
+                    raise ValueError("Закрытая ветка не поддерживается анонимной проверкой")
+                build = info["buildid"]
+                if not build.isdigit() or int(build) <= 0:
+                    raise ValueError("Некорректный buildid в ответе SteamCMD")
+                return build
+    raise ValueError("Неполный ответ SteamCMD")
+
+
+def published_event(current: Snapshot, branch: str, build: str) -> tuple[str, str] | None:
+    # A rolled-back installed beta can have a larger ID; report a difference, not "newer".
+    if (current.branch != branch or current.build == build
+            or (current.pending and current.target == build)):
+        return None
+    return (f"published:{branch}:{build}",
+            f"В Steam опубликована другая сборка: {build} (ветка {branch}), "
+            f"на этом ПК установлена {current.build}. Проверьте Steam → Загрузки. "
+            "Доступность обновления в вашем клиенте пока не подтверждена.")
+
+
+class MetadataProbe:
+    """One nonblocking SteamCMD metadata job at a time; bounded retries and cleanup."""
+    def __init__(self, config: dict, app_id: int):
+        self.config = config
+        self.app_id = app_id
+        self.process = None
+        self.output = None
+        self.next_check = 0.0
+        self.started = 0.0
+        self.branch = "public"
+        self.failures = 0
+        self.last_problem = None
+        self.last_result = None
+        self.command = None
+        if config["enabled"]:
+            self.command = shutil.which(str(Path(config["steamcmd_path"]).expanduser()))
+            if self.command is None:
+                LOG.warning("SteamCMD не найден: ранняя проверка публикаций выключена. "
+                            "Установите SteamCMD и задайте release.steamcmd_path. "
+                            "Локальные уведомления продолжают работать.")
+
+    def close(self) -> None:
+        if self.process is not None:
+            if self.process.poll() is None:
+                if os.name == "posix":
+                    try:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    self.process.kill()
+            self.process.wait(timeout=5)
+            self.process = None
+        if self.output is not None:
+            self.output.close()
+            self.output = None
+
+    def failed(self, now: float, problem: str) -> None:
+        self.close()
+        self.failures += 1
+        delay = min(900, self.config["poll_seconds"] * 2 ** min(self.failures, 4))
+        self.next_check = now + delay
+        if problem != self.last_problem:
+            LOG.warning("Ранняя проверка сборки: %s; повтор через %s с. "
+                        "Локальные уведомления продолжают работать.", problem, delay)
+            self.last_problem = problem
+
+    def poll(self, current: Snapshot, now: float) -> tuple[str, str] | None:
+        if self.command is None:
+            return None
+        if self.process is not None:
+            result = self.process.poll()
+            if result is None:
+                if now - self.started >= self.config["timeout_seconds"]:
+                    self.failed(now, "таймаут SteamCMD")
+                return None
+            try:
+                if result != 0:
+                    raise ValueError(f"SteamCMD завершился с кодом {result}")
+                self.output.seek(0)
+                output = self.output.read().decode("utf-8", errors="replace")
+                build = parse_app_info(output, self.app_id, self.branch)
+                branch = self.branch
+                self.close()
+                self.failures = 0
+                self.last_problem = None
+                # Wait a full interval after completion, not just after launching.
+                self.next_check = now + self.config["poll_seconds"]
+                if self.last_result != (branch, build):
+                    LOG.info("SteamCMD: ветка %s, опубликованная сборка %s", branch, build)
+                    self.last_result = (branch, build)
+                return branch, build
+            except (OSError, ValueError, KeyError) as error:
+                self.failed(now, str(error))
+                return None
+        if now < self.next_check:
+            return None
+        try:
+            self.output = tempfile.TemporaryFile()
+            self.branch = current.branch
+            self.process = subprocess.Popen(
+                [self.command, "+login", "anonymous", "+app_info_update", "1",
+                 "+app_info_print", str(self.app_id), "+quit"],
+                stdin=subprocess.DEVNULL, stdout=self.output, stderr=subprocess.STDOUT,
+                start_new_session=(os.name == "posix"))
+            self.started = now
+        except OSError as error:
+            self.failed(now, str(error))
+        return None
 
 
 def run_command(args: list[str], **kwargs) -> None:
@@ -245,6 +382,17 @@ DELIVERED: set[tuple[str, str, str]] = set()
 def load_config(path: Path) -> dict:
     with path.open("rb") as handle:
         config = tomllib.load(handle)
+    # Old configs keep working; early signals default to enabled if keys are omitted.
+    release = config.setdefault("release", {})
+    for key, value in {"enabled": True, "steamcmd_path": "steamcmd",
+                       "poll_seconds": 60, "timeout_seconds": 45}.items():
+        release.setdefault(key, value)
+    config["notifications"].setdefault("published", True)
+    if type(release["enabled"]) is not bool or not isinstance(release["steamcmd_path"], str) or not release["steamcmd_path"]:
+        raise ValueError("release.enabled: bool; release.steamcmd_path: непустой путь")
+    for key, low, high in [("poll_seconds", 60, 3600), ("timeout_seconds", 10, 300)]:
+        if type(release[key]) not in (int, float) or not low <= release[key] <= high:
+            raise ValueError(f"release.{key}: число от {low} до {high}")
     game = config["game"]
     if type(game["app_id"]) is not int or game["app_id"] <= 0 or not isinstance(game["name"], str):
         raise ValueError("game.app_id должен быть положительным целым, game.name — строкой")
@@ -252,7 +400,7 @@ def load_config(path: Path) -> dict:
     interval = watch["poll_seconds"]
     if type(interval) not in (int, float) or not 1 <= interval <= 3600:
         raise ValueError("watch.poll_seconds: число от 1 до 3600")
-    for section, keys in [("notifications", ["desktop", "sound", "queued", "installed"]), ("telegram", ["enabled"])]:
+    for section, keys in [("notifications", ["desktop", "sound", "queued", "installed", "published"]), ("telegram", ["enabled"])]:
         for key in keys:
             if type(config[section][key]) is not bool:
                 raise ValueError(f"{section}.{key} должен быть true или false")
@@ -291,6 +439,7 @@ def main() -> int:
     parser.add_argument("--test-notification", action="store_true", help="Проверить настроенные оповещения")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    probe = None
     try:
         config = load_config(args.config)
         if args.test_notification:
@@ -313,49 +462,74 @@ def main() -> int:
         pending: dict[str, tuple[str, float]] = {}
         failures = 0
         last_problem = None
+        current = first
+        probe = MetadataProbe(config["release"], config["game"]["app_id"])
+        if probe.command:
+            LOG.info("Ранняя проверка публикаций: SteamCMD, интервал %s с", config["release"]["poll_seconds"])
+
+        def enqueue(events):
+            for key, message in events:
+                if key in tracker.sent or key in pending:
+                    continue
+                LOG.info(message)
+                kind = key.split(":", 1)[0]
+                if kind == "required":
+                    kind = "queued"
+                if kind in {"queued", "installed", "published"} and not config["notifications"][kind]:
+                    tracker.sent.add(key)
+                else:
+                    pending[key] = (message, 0)
+
+        delay = config["watch"]["poll_seconds"]
+        next_local = 0.0
         while True:
-            try:
-                if not steam_running():
-                    raise RuntimeError("Steam не запущен. Жду запуска клиента.")
-                current = read_snapshot(manifest, config["game"]["app_id"])
-                for key, message in tracker.observe(current):
-                    if key not in pending:
-                        LOG.info(message)
-                        kind = key.split(":", 1)[0]
-                        if kind in {"queued", "installed"} and not config["notifications"][kind]:
-                            tracker.sent.add(key)
-                        else:
-                            pending[key] = (message, 0)
-                now = time.monotonic()
-                for key, (message, retry_at) in list(pending.items()):
-                    if now >= retry_at:
-                        if notify(config, message):
-                            tracker.sent.add(key)
-                            del pending[key]
-                        else:
-                            pending[key] = (message, now + 60)
-                if tracker.sent != persisted:
-                    save_state(state_path, tracker.sent)
-                    persisted = set(tracker.sent)
-                failures = 0
-                last_problem = None
-                delay = config["watch"]["poll_seconds"]
-            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
-                # Do not compare counters across a stopped client / unreadable snapshot.
-                tracker.previous = None
-                problem = str(error)
-                if problem != last_problem:
-                    LOG.warning("%s", problem)
-                    last_problem = problem
-                failures += 1
-                delay = min(60, config["watch"]["poll_seconds"] * 2 ** min(failures, 6))
-            time.sleep(delay)
+            if time.monotonic() >= next_local:
+                try:
+                    if not steam_running():
+                        raise RuntimeError("Steam не запущен. Жду запуска клиента.")
+                    current = read_snapshot(manifest, config["game"]["app_id"])
+                    enqueue(tracker.observe(current))
+                    failures = 0
+                    last_problem = None
+                    delay = config["watch"]["poll_seconds"]
+                except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+                    # Do not compare counters across a stopped client / unreadable snapshot.
+                    tracker.previous = None
+                    problem = str(error)
+                    if problem != last_problem:
+                        LOG.warning("%s", problem)
+                        last_problem = problem
+                    failures += 1
+                    delay = min(60, config["watch"]["poll_seconds"] * 2 ** min(failures, 6))
+                next_local = time.monotonic() + delay
+            now = time.monotonic()
+            release_result = probe.poll(current, now)
+            if release_result:
+                event = published_event(current, *release_result)
+                if event:
+                    enqueue([event])
+            for key, (message, retry_at) in list(pending.items()):
+                if now >= retry_at:
+                    if notify(config, message):
+                        tracker.sent.add(key)
+                        del pending[key]
+                    else:
+                        pending[key] = (message, now + 60)
+            if tracker.sent != persisted:
+                save_state(state_path, tracker.sent)
+                persisted = set(tracker.sent)
+            # Local retry backoff must not delay completion of an in-flight metadata job.
+            time.sleep(min(delay, config["watch"]["poll_seconds"]) if probe.command else delay)
     except KeyboardInterrupt:
         LOG.info("Остановлено")
         return 0
     except (OSError, ValueError, KeyError) as error:
         LOG.error("%s", error)
         return 1
+
+    finally:
+        if probe is not None:
+            probe.close()
 
 
 if __name__ == "__main__":
