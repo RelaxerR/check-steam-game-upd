@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from steam_watch import Snapshot, Tracker, find_manifest, load_config, parse_vdf, read_snapshot, save_state, load_state, notify, DELIVERED, main, parse_app_info, published_event, MetadataProbe
+from steam_watch import Snapshot, Tracker, find_manifest, load_config, parse_vdf, read_snapshot, save_state, load_state, notify, DELIVERED, main, parse_app_info, published_event, MetadataProbe, sound
 
 
 def snapshot(build="100", target="0", flags=4, downloaded=0, branch="public"):
@@ -260,6 +260,30 @@ class WatchTests(unittest.TestCase):
                   patch("steam_watch.notify", side_effect=[False, True, True]) as notification):
                 self.assertEqual(main(), 1)
                 self.assertEqual(notification.call_count, 3)
+
+
+    def test_custom_sound_is_nonblocking_and_does_not_overlap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "alarm.mp3"
+            path.write_bytes(b"audio fixture")
+            config = {"notifications": {"sound_file": str(path), "sound_duration_seconds": 15}}
+            process = MagicMock()
+            process.poll.return_value = None
+            with (patch("steam_watch.sys.platform", "darwin"),
+                  patch("steam_watch.SOUND_PROCESS", None),
+                  patch("steam_watch.subprocess.Popen", return_value=process) as launch):
+                sound(config)
+                sound(config)
+                self.assertEqual(launch.call_count, 1)
+                self.assertEqual(launch.call_args.args[0], ["afplay", "-t", "15", str(path)])
+                process.poll.return_value = 0
+                sound(config)
+                self.assertEqual(launch.call_count, 2)
+
+    def test_custom_sound_missing_file_reports_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FileNotFoundError):
+                sound({"notifications": {"sound_file": str(Path(directory) / "missing.mp3")}})
 
     def test_invalid_saved_state(self):
         with tempfile.TemporaryDirectory() as directory:

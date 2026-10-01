@@ -334,8 +334,70 @@ $n.Dispose()'''
         run_command(["notify-send", title, message], capture_output=True)
 
 
-def sound() -> None:
-    if sys.platform == "win32":
+SOUND_PROCESS = None
+
+
+def sound(config: dict | None = None) -> None:
+    """Start an alarm clip without blocking update checks or overlapping tracks."""
+    global SOUND_PROCESS
+    settings = (config or {}).get("notifications", {})
+    audio_file = settings.get("sound_file", "")
+    if audio_file:
+        path = Path(audio_file).expanduser()
+        if not path.is_absolute():
+            path = BASE / path
+        if not path.is_file():
+            raise FileNotFoundError(f"Звуковой файл не найден: {path}")
+        if SOUND_PROCESS is not None and SOUND_PROCESS.poll() is None:
+            return
+        duration = settings.get("sound_duration_seconds", 15)
+        if sys.platform == "darwin":
+            command = ["afplay"]
+            if duration:
+                command += ["-t", str(duration)]
+            command += [str(path)]
+        elif sys.platform == "win32":
+            # MCI plays MP3 without Python dependencies. All paths are passed via env.
+            script = r'''Add-Type -TypeDefinition @"
+using System.Runtime.InteropServices;
+public class AlarmMci {
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "mciSendStringW")]
+    public static extern uint Send(string command, System.Text.StringBuilder result, uint length, System.IntPtr window);
+}
+"@
+$opened = [AlarmMci]::Send(('open "' + $env:SW_AUDIO + '" type mpegvideo alias alarm'), $null, 0, [IntPtr]::Zero)
+if ($opened -ne 0) { exit 1 }
+try {
+    if ([AlarmMci]::Send('play alarm', $null, 0, [IntPtr]::Zero) -ne 0) { exit 1 }
+    if ([double]$env:SW_AUDIO_SECONDS -gt 0) {
+        Start-Sleep -Milliseconds ([int]([double]$env:SW_AUDIO_SECONDS * 1000))
+    } else {
+        do {
+            Start-Sleep -Milliseconds 250
+            $status = New-Object System.Text.StringBuilder 64
+            [void][AlarmMci]::Send('status alarm mode', $status, 64, [IntPtr]::Zero)
+        } while ($status.ToString() -eq 'playing')
+    }
+} finally { [void][AlarmMci]::Send('close alarm', $null, 0, [IntPtr]::Zero) }
+'''
+            command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+        else:
+            if shutil.which("ffplay"):
+                command = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error"]
+                if duration:
+                    command += ["-t", str(duration)]
+                command += [str(path)]
+            elif shutil.which("mpv"):
+                command = ["mpv", "--no-video"]
+                if duration:
+                    command += [f"--length={duration}"]
+                command += [str(path)]
+            else:
+                raise RuntimeError("Для MP3 на Linux установите ffmpeg (ffplay) или mpv")
+        SOUND_PROCESS = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                         env={**os.environ, "SW_AUDIO": str(path),
+                                              "SW_AUDIO_SECONDS": str(duration)})
+    elif sys.platform == "win32":
         import winsound
         winsound.MessageBeep()
     elif sys.platform == "darwin":
@@ -360,7 +422,7 @@ def notify(config: dict, message: str, *, retry: bool = True) -> bool:
     channels = config["notifications"]
     success = True
     for name, action in [("desktop", lambda: desktop(title, message)),
-                         ("sound", sound),
+                         ("sound", lambda: sound(config)),
                          ("telegram", lambda: telegram(config["telegram"], f"{title}\n{message}"))]:
         enabled = config["telegram"]["enabled"] if name == "telegram" else channels[name]
         cache_key = (name, title, message)
@@ -389,6 +451,14 @@ def load_config(path: Path) -> dict:
                        "poll_seconds": 60, "timeout_seconds": 45}.items():
         release.setdefault(key, value)
     config["notifications"].setdefault("published", True)
+    notifications = config["notifications"]
+    notifications.setdefault("sound_file", "")
+    notifications.setdefault("sound_duration_seconds", 15)
+    if not isinstance(notifications["sound_file"], str):
+        raise ValueError("notifications.sound_file должен быть строкой")
+    duration = notifications["sound_duration_seconds"]
+    if type(duration) not in (int, float) or not 0 <= duration <= 600:
+        raise ValueError("notifications.sound_duration_seconds: число от 0 до 600")
     if type(release["enabled"]) is not bool or not isinstance(release["steamcmd_path"], str) or not release["steamcmd_path"]:
         raise ValueError("release.enabled: bool; release.steamcmd_path: непустой путь")
     for key, low, high in [("poll_seconds", 60, 3600), ("timeout_seconds", 10, 300)]:
