@@ -354,7 +354,7 @@ def telegram(config: dict, message: str) -> None:
             raise ValueError("Telegram отклонил сообщение")
 
 
-def notify(config: dict, message: str) -> bool:
+def notify(config: dict, message: str, *, retry: bool = True) -> bool:
     """Retry failed channels; successful channels are not resent in this process."""
     title = f'{config["game"]["name"]} — Steam'
     channels = config["notifications"]
@@ -371,7 +371,8 @@ def notify(config: dict, message: str) -> bool:
             DELIVERED.add(cache_key)
         except Exception as error:
             # urllib exceptions can include a bot token in their URL; log type only.
-            LOG.warning("Оповещение %s не доставлено (%s); повтор через 60 секунд", name, type(error).__name__)
+            LOG.warning("Оповещение %s не доставлено (%s); %s", name, type(error).__name__,
+                        "повтор через 60 секунд" if retry else "в тестовом режиме повторов нет")
             success = False
     return success
 
@@ -432,18 +433,48 @@ def save_state(path: Path, sent: set[str]) -> None:
     temporary.replace(path)
 
 
+
+def simulate_update(config: dict) -> int:
+    """Exercise real detection and notification channels with in-memory snapshots."""
+    LOG.info("ТЕСТ: через 3 секунды сымитируем обновление, затем загрузку и установку. "
+             "Сообщения помечены [ТЕСТ]; Steam не требуется.")
+    tracker = Tracker(Snapshot("100", "0", 4, 0, "public"))
+    steps = [Snapshot("100", "200", 6, 0, "public"),
+             Snapshot("100", "200", 262, 1048576, "public"),
+             Snapshot("200", "0", 4, 0, "public")]
+    success = True
+    for current in steps:
+        time.sleep(3)
+        for key, message in tracker.observe(current):
+            message = "[ТЕСТ] " + message
+            LOG.info(message)
+            kind = key.split(":", 1)[0]
+            if kind in {"queued", "installed"} and not config["notifications"][kind]:
+                LOG.info("ТЕСТ: канал события %s выключен в конфиге; только консоль", kind)
+            elif not notify(config, message, retry=False):
+                success = False
+            tracker.sent.add(key)
+    LOG.info("ТЕСТ завершён. История реальных событий не изменена.")
+    return 0 if success else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.toml")
-    parser.add_argument("--once", action="store_true", help="Прочитать статус и выйти без уведомлений")
-    parser.add_argument("--test-notification", action="store_true", help="Проверить настроенные оповещения")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--once", action="store_true", help="Прочитать статус и выйти без уведомлений")
+    modes.add_argument("--test-notification", action="store_true", help="Проверить настроенные оповещения")
+    modes.add_argument("--simulate-update", action="store_true",
+                       help="Через 3 секунды сымитировать обновление, затем загрузку и установку")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     probe = None
     try:
         config = load_config(args.config)
+        if args.simulate_update:
+            return simulate_update(config)
         if args.test_notification:
-            return 0 if notify(config, "Тест оповещения Steam Watch") else 1
+            return 0 if notify(config, "Тест оповещения Steam Watch", retry=False) else 1
         manifest = find_manifest(config)
         first = read_snapshot(manifest, config["game"]["app_id"])
         LOG.info("Манифест: %s; build=%s target=%s branch=%s pending=%s",

@@ -226,6 +226,41 @@ class WatchTests(unittest.TestCase):
                 self.assertEqual(probe.poll.call_count, 2)
                 probe.close.assert_called_once()
 
+
+    def test_simulation_uses_real_notifications_without_steam_or_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.toml"
+            config.write_text(Path("config.example.toml").read_text())
+            with (patch("sys.argv", ["steam_watch.py", "--config", str(config), "--simulate-update"]),
+                  patch("steam_watch.find_manifest") as manifest,
+                  patch("steam_watch.MetadataProbe") as probe,
+                  patch("steam_watch.save_state") as save,
+                  patch("steam_watch.time.sleep") as sleep,
+                  patch("steam_watch.notify", return_value=True) as notification):
+                self.assertEqual(main(), 0)
+                self.assertEqual([call.args for call in sleep.call_args_list], [(3,), (3,), (3,)])
+                self.assertEqual(notification.call_count, 3)
+                messages = [call.args[1] for call in notification.call_args_list]
+                self.assertTrue(all(message.startswith("[ТЕСТ]") for message in messages))
+                self.assertIn("Скачать сейчас", messages[0])
+                self.assertIn("загружается", messages[1])
+                self.assertIn("установил", messages[2])
+                manifest.assert_not_called()
+                probe.assert_not_called()
+                save.assert_not_called()
+                self.assertFalse((root / ".state").exists())
+
+    def test_simulation_reports_delivery_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.toml"
+            config.write_text(Path("config.example.toml").read_text())
+            with (patch("sys.argv", ["steam_watch.py", "--config", str(config), "--simulate-update"]),
+                  patch("steam_watch.time.sleep"),
+                  patch("steam_watch.notify", side_effect=[False, True, True]) as notification):
+                self.assertEqual(main(), 1)
+                self.assertEqual(notification.call_count, 3)
+
     def test_invalid_saved_state(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
