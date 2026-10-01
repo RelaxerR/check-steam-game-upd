@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+config.toml
+.state/
+.env
+.DS_Store

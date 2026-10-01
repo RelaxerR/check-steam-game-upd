@@ -1,0 +1,28 @@
+[game]
+app_id = 252490
+name = "Rust"
+# Обычно библиотеки Steam находятся автоматически.
+steam_path = ""
+# Точный путь к appmanifest_252490.acf имеет приоритет над steam_path.
+# Windows: используйте одинарные кавычки для путей с обратными слешами.
+manifest_path = ""
+
+[watch]
+# Читаем только локальные файлы. Минимум 1 секунда, по умолчанию 2.
+poll_seconds = 2
+# Каталог состояния относительно конфига; подавляет повторные уведомления.
+state_file = ".state"
+
+[notifications]
+desktop = true
+sound = true
+# Очередь не доказывает доступность CDN: по умолчанию только запись в консоль.
+queued = false
+# Сообщить, если обновление успело установиться между проверками.
+installed = true
+
+[telegram]
+enabled = false
+# Секреты берутся из окружения, не из файла и не попадают в Git.
+token_env = "STEAM_WATCH_TELEGRAM_TOKEN"
+chat_id_env = "STEAM_WATCH_TELEGRAM_CHAT_ID"
